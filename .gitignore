@@ -1,0 +1,18 @@
+# Secrets
+.env
+*.secret
+*.key
+*.pem
+
+# Proxmox API token config
+pve/pve.yml
+
+# Runtime/generated data
+prometheus-data/
+alertmanager-data/
+grafana-data/
+
+# Local editor/system files
+.DS_Store
+*.swp
+.vscode/
