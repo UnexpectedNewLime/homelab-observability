@@ -1,0 +1,90 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - alertmanager
+      - blackbox
+      - pve-exporter
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    depends_on:
+      - alert-dump
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  blackbox:
+    image: quay.io/prometheus/blackbox-exporter:latest
+    container_name: blackbox
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+
+  pve-exporter:
+    image: prompve/prometheus-pve-exporter:latest
+    container_name: pve-exporter
+    restart: unless-stopped
+    volumes:
+      - ./pve/pve.yml:/etc/prometheus/pve.yml:ro
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: monitoring-node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro,rslave
+
+  alert-dump:
+    image: python:3.12-slim
+    container_name: alert-dump
+    restart: unless-stopped
+    working_dir: /app
+    command: python app.py
+    volumes:
+      - ./alert-dump:/app
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

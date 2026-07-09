@@ -7,6 +7,10 @@
 # Proxmox API token config
 pve/pve.yml
 
+# Real internal IPs/hostnames/IDs (see .example counterparts)
+prometheus/prometheus.yml
+prometheus/rules/homelab.yml
+
 # Runtime/generated data
 prometheus-data/
 alertmanager-data/

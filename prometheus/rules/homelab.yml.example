@@ -1,0 +1,98 @@
+groups:
+  - name: homelab_reachability
+    rules:
+      - alert: TargetScrapeDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus target is down"
+          description: "{{ $labels.job }} target {{ $labels.instance }} is not being scraped."
+          runbook: "Check network reachability, exporter service, firewall, and host power state."
+
+      - alert: BlackboxProbeFailed
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blackbox probe failed"
+          description: "{{ $labels.service }} endpoint {{ $labels.instance }} failed {{ $labels.check_type }} probe."
+          runbook: "Check whether the host/service is reachable from the monitoring laptop."
+
+  - name: homelab_proxmox
+    rules:
+      - alert: ProxmoxGuestDown
+        expr: pve_up{id=~"qemu/DISCORD_VM_ID|lxc/NEXTCLOUD_CT_ID"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Proxmox guest is down"
+          description: "Proxmox guest {{ $labels.id }} is not running."
+          runbook: "Check Proxmox UI, guest logs, storage availability, and recent power events."
+
+      - alert: ProxmoxStorageNearlyFull
+        expr: 100 * (pve_disk_usage_bytes{type="storage"} / pve_disk_size_bytes{type="storage"}) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proxmox storage nearly full"
+          description: "Storage {{ $labels.storage }} on {{ $labels.node }} is above 85%."
+
+  - name: homelab_linux_hosts
+    rules:
+      - alert: FilesystemNearlyFull
+        expr: |
+          100 * (
+            1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"} 
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"}
+          ) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Filesystem nearly full"
+          description: "{{ $labels.instance }} filesystem {{ $labels.mountpoint }} is above 85%."
+
+      - alert: HighMemoryPressure
+        expr: |
+          100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory pressure"
+          description: "{{ $labels.instance }} memory usage is above 90%."
+
+      - alert: HighCpuLoad
+        expr: |
+          100 * (1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "{{ $labels.instance }} CPU usage is above 90% for 10 minutes."
+
+  - name: homelab_services
+    rules:
+      - alert: NextcloudHttpDown
+        expr: probe_success{service="nextcloud", endpoint="nextcloud-status"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nextcloud status endpoint is down"
+          description: "Nextcloud did not return a successful HTTP response."
+
+      - alert: DiscordBotHealthcheckDown
+        expr: probe_success{service="discord-bot", endpoint="bot-healthz"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Discord bot health endpoint is down"
+          description: "The Discord bot /healthz endpoint is not healthy."
