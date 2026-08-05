@@ -1,5 +1,5 @@
 default:
   user: prometheus@pve
-  token_name: metrics
+  token_name: prometheus
   token_value: "PASTE_TOKEN_SECRET_HERE"
   verify_ssl: false
