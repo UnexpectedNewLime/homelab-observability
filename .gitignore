@@ -20,3 +20,7 @@ grafana-data/
 .DS_Store
 *.swp
 .vscode/
+
+# Local machine-only state
+.ssh/
+.claude/
