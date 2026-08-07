@@ -23,10 +23,10 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets:
-          - MONTORING_IP:9100
+          - MONITORING_IP:9100
         labels:
-          service: monitoring-laptop
-          role: monitor
+          service: monitoring-host
+          role: host
 
       - targets:
           - PROXMOX_IP:9100

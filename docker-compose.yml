@@ -1,4 +1,18 @@
 services:
+  config-generator:
+    image: busybox:stable
+    container_name: config-generator
+    env_file: .env
+    entrypoint: ["sh", "/generate-config.sh"]
+    volumes:
+      - ./scripts/generate-config.sh:/generate-config.sh:ro
+      - ./prometheus/prometheus.yml.example:/templates/prometheus.yml.example:ro
+      - ./prometheus/rules/homelab.yml.example:/templates/homelab.yml.example:ro
+      - ./pve/pve.yml.example:/templates/pve.yml.example:ro
+      - ./prometheus:/output/prometheus
+      - ./prometheus/rules:/output/rules
+      - ./pve:/output/pve
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -14,9 +28,14 @@ services:
       - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     depends_on:
-      - alertmanager
-      - blackbox
-      - pve-exporter
+      config-generator:
+        condition: service_completed_successfully
+      alertmanager:
+        condition: service_started
+      blackbox:
+        condition: service_started
+      pve-exporter:
+        condition: service_started
 
   alertmanager:
     image: prom/alertmanager:latest
@@ -61,6 +80,9 @@ services:
     image: prompve/prometheus-pve-exporter:latest
     container_name: pve-exporter
     restart: unless-stopped
+    depends_on:
+      config-generator:
+        condition: service_completed_successfully
     volumes:
       - ./pve/pve.yml:/etc/prometheus/pve.yml:ro
 
