@@ -1,0 +1,53 @@
+logging {
+  level = "info"
+}
+loki.write "watcher" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+    max_backoff_retries = 0
+  }
+  wal {
+    enabled = true
+    max_segment_age = "24h"
+  }
+}
+discovery.relabel "journal" {
+  targets = []
+  rule {
+    target_label = "service"
+    replacement = "system"
+  }
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    regex = "(.+[.]service)"
+    target_label = "service"
+  }
+  rule {
+    source_labels = ["__journal__transport"]
+    regex = "kernel"
+    target_label = "service"
+    replacement = "kernel"
+  }
+  rule {
+    source_labels = ["service"]
+    regex = "(.+)@.+[.]service"
+    target_label = "service"
+    replacement = "$1@.service"
+  }
+  rule {
+    source_labels = ["service"]
+    regex = "run-.+[.]service"
+    target_label = "service"
+    replacement = "transient.service"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label = "level"
+  }
+}
+loki.source.journal "host" {
+  max_age = "12h"
+  labels = {host = "WATCHER_HOST_LABEL", ct = "host"}
+  relabel_rules = discovery.relabel.journal.rules
+  forward_to = [loki.write.watcher.receiver]
+}

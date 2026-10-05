@@ -1,0 +1,74 @@
+groups:
+  - name: proxmox_log_pipeline
+    interval: 15s
+    rules:
+      - alert: ServiceDown
+        expr: node_systemd_unit_state{service="proxmox", name=~"(pvedaemon|pveproxy|pvestatd|pvescheduler|pve-cluster|alloy|homelab-alert-test)\\.service", state=~"inactive|failed"} == 1
+        for: 15s
+        labels:
+          severity: critical
+          host: pve
+          ct: host
+          service: '{{ $labels.name }}'
+        annotations:
+          summary: 'Proxmox service {{ $labels.name }} is {{ $labels.state }}'
+          ct: host
+          service: '{{ $labels.name }}'
+          severity: critical
+          runbook_hint: 'Inspect systemctl status and journalctl -u {{ $labels.name }} on Proxmox before restarting.'
+      - alert: ProxmoxSystemdMetricsMissing
+        expr: absent(node_systemd_unit_state{service="proxmox", name="alloy.service"})
+        for: 2m
+        labels:
+          severity: warning
+          host: pve
+          ct: host
+          service: node-exporter
+        annotations:
+          summary: "Proxmox systemd monitoring is missing"
+          ct: host
+          service: node-exporter
+          severity: warning
+          runbook_hint: "Check the node exporter systemd collector and Prometheus scrape health."
+      - alert: DiskPressure
+        expr: node_filesystem_avail_bytes{service="proxmox", fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"} / node_filesystem_size_bytes{service="proxmox", fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"} < 0.10 and on(instance, device, mountpoint) node_filesystem_readonly == 0
+        for: 10m
+        labels:
+          severity: critical
+          host: pve
+          ct: host
+          service: filesystem
+        annotations:
+          summary: 'Proxmox filesystem {{ $labels.mountpoint }} has less than 10% free'
+          ct: host
+          service: filesystem
+          severity: critical
+          runbook_hint: "Inspect disk usage, ZFS and retention. Do not delete guest data."
+      - alert: LokiDown
+        expr: absent(up{job="observability-self", service="loki"} == 1)
+        for: 1m
+        labels:
+          severity: critical
+          host: WATCHER_HOST_LABEL
+          ct: host
+          service: loki
+        annotations:
+          summary: "Loki is unavailable; log alert evaluation may be stopped"
+          ct: host
+          service: loki
+          severity: critical
+          runbook_hint: "Check docker compose ps loki and docker compose logs loki on watcher."
+      - alert: NtfyDeliveryFailures
+        expr: increase(ntfy_bridge_failures_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alert notifications are failing to reach ntfy"
+          runbook_hint: "Inspect Alertmanager and ntfy-bridge logs. This alert shares the affected delivery path; an external heartbeat remains a separate follow-up."
+      - alert: LokiRuleEvaluationFailures
+        expr: increase(loki_prometheus_rule_evaluation_failures_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Loki alert rule could not be evaluated"
+          runbook_hint: "Inspect the Loki ruler logs and its configured LogQL rules."

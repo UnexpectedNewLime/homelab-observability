@@ -1,0 +1,234 @@
+# Loki forwarding and ntfy alerting — deployed 2026-10-05
+
+## Running configuration
+
+The watcher stack lives in `/opt/observability`. Existing Prometheus, Grafana,
+Alertmanager, exporters and their volumes were retained. This tracked runbook uses
+setting names instead of deployment addresses. Keep any filled-in local copy at
+the ignored `LOGGING-ALERTING-RUNBOOK.md`. Do not commit `.env`, `pve/pve.yml`,
+credentials, backup directories or Docker volume contents.
+
+| Component | Deployment |
+| --- | --- |
+| Proxmox Alloy | Native Grafana package 1.20.1-1, systemd service `alloy` |
+| Watcher Alloy | 1.20.1, container `alloy` |
+| Loki | 3.7.8, container `loki`, persistent `loki-data` volume |
+| Loki ingress | Nginx, container `loki-ingress`, only Proxmox may POST logs |
+| ntfy | 2.28.0, container `ntfy`, persistent auth and 72-hour message cache |
+| Tailscale | 1.102.5, userspace container `ntfy-tailscale`, persistent identity |
+| Alert translation | `ntfy-bridge`, a small Python HTTP service with delivery retries delegated to Alertmanager |
+
+New images are pinned by digest in `docker-compose.yml`. Existing image tags were
+not upgraded. Pinning requires deliberate updates when new releases are adopted.
+
+## Log sources and access
+
+- Proxmox host journal, including kernel and PVE daemon messages.
+- The active Nextcloud container journal at `NEXTCLOUD_JOURNAL_PATH`, read by the host Alloy user.
+- Newly completed PVE task summaries in `/var/log/pve/tasks/index` (followed across
+  rotation; initial collection starts at the end, without replaying old failures).
+- Watcher's host journal. Container stdout is still available with `docker compose logs`;
+  a Docker stdout collector was not added.
+- Retired guests are excluded. The active bot VM's separate guest/application logs
+  are outside this pass; its existing metrics and availability alerts remain active.
+
+Logs use `host`, `ct`, `service`, and journal severity `level`; Proxmox also has
+`unit`. Session scope IDs are not indexed as service labels. Template/transient
+unit names are normalised to bound label cardinality. Native Alloy runs as its
+own user with `adm` and `systemd-journal` membership, not as root.
+
+Grafana: `http://MONITORING_IP:3000`, Explore → Loki (UID `homelab-loki`).
+The existing Prometheus datasource was retained.
+
+```logql
+{host="pve", ct="host"}
+{host="pve", ct="NEXTCLOUD_CT_ID"}
+{host="pve", service="pveproxy.service"}
+{host="pve", service="pve-tasks"}
+{host="WATCHER_HOST_LABEL"}
+```
+
+Loki queries are available on the Compose network as `http://loki:3100` and on
+watcher loopback as `http://127.0.0.1:3100`. The LAN endpoint
+`http://MONITORING_IP:3100/loki/api/v1/push` accepts POSTs only from `PROXMOX_IP`.
+Queries/admin routes are denied on that endpoint. This application-layer ingress
+restriction does not depend on UFW filtering Docker-published ports.
+
+Loki uses TSDB schema v13, 24-hour index periods, 14-day compactor retention and a
+2-hour deletion delay. Prometheus retains 30 days. Both Alloy installations have
+an explicit WAL with a 24-hour maximum segment age and indefinite HTTP retry;
+outages exceeding that window can lose logs. WAL requires Alloy's experimental
+stability flag in the installed release. Check disk usage during prolonged outages.
+
+## Phone notifications
+
+Server: `NTFY_BASE_URL` from local `.env` (tailnet only; no Funnel).
+Device: `watcher-alerts`; inspect its current address with the Tailscale CLI.
+
+1. Connect Tailscale on the phone and install/open ntfy.
+2. Add the custom server URL above, sign in as `phone`, then subscribe to
+   `homelab-critical` and `homelab-warning`.
+3. Retrieve the phone password in your own trusted terminal:
+
+   ```sh
+   ssh watcher 'cat "$HOME/.config/homelab-alerting/ntfy-phone.secret"'
+   ```
+
+   Do not paste the password into chat, documentation or Git. The phone identity
+   can read these two topics but cannot publish. The separate `alert-publisher`
+   account can publish but cannot read them. Anonymous topic access is denied.
+4. Permit background operation for ntfy and Tailscale on Android, then verify a
+   notification with the phone locked and with home Wi-Fi disabled.
+
+Publisher and phone credentials are on watcher only in
+`NTFY_CREDENTIALS_DIR` (directory 0700, files 0600; default for helper scripts is
+`~/.config/homelab-alerting`). Adjust the command above if using a different directory. The bridge mounts
+only the publisher password read-only. Administrative user maintenance uses the
+local ntfy CLI; no broad admin password was created.
+
+```sh
+cd /opt/observability
+docker compose exec ntfy ntfy user change-pass phone
+```
+
+After changing a password through the CLI, update the corresponding secret file
+securely; changing only a file does not update ntfy's user database. Provisioning
+script `scripts/provision-ntfy-users.py` intentionally refuses to overwrite existing
+credentials and is not a rotation script.
+
+Tailscale uses a named state volume and `TS_AUTH_ONCE=true`. The Tailscale
+and ntfy services have independent Docker network namespaces; Serve proxies to
+`http://ntfy:80` on the private Compose network so either can restart independently.
+The initial login window is 30 minutes to allow interactive enrolment. The server has HTTPS enabled.
+Review the device's key expiry in the Tailscale admin console for unattended use;
+key expiry policy was not changed by this deployment.
+
+## Rules and notification policy
+
+- `ServiceDown`: listed PVE core services and Alloy inactive/failed for 15 seconds.
+- Existing `ProxmoxGuestDown`: the configured active container and VM down for 2 minutes.
+- `DiskPressure`: writable Proxmox filesystems below 10% available for 10 minutes.
+- `OOMKill`: matching kernel OOM entries in a 5-minute window.
+- `BackupFailed`: non-OK `vzdump` task summaries in a 15-minute window. This detects
+  reported failures, not backups that never run; backup freshness remains separate.
+- `ProxmoxLogForwardingStalled`: no one-minute journal heartbeat for 5 minutes,
+  followed by 1 minute pending. Heartbeat is generated by `homelab-log-heartbeat.timer`.
+- Loki availability/rule evaluation and ntfy delivery failures are also monitored.
+  Prometheus scrapes Alertmanager, Blackbox, PVE exporter, Loki, watcher Alloy and
+  the bridge; Blackbox also probes ntfy's health endpoint.
+
+The old `alert-dump` receiver remains as a parallel record. Initial grouping waits
+5 seconds; subsequent changes in a group are notified at 5-minute intervals.
+Critical repeats are hourly, warning repeats every 12 hours. Resolved notifications
+use low priority. Unrecognised severities fall back to the warning topic.
+The bridge returns HTTP 502 when ntfy delivery fails so Alertmanager retries.
+
+No automatic remediation was installed. No broad critical-over-warning inhibition
+was enabled. An external heartbeat/dead-man check still needs a chosen independent
+service and endpoint: a watcher-wide outage cannot notify through this stack itself.
+
+## Validate and reload
+
+```sh
+cd /opt/observability
+docker compose config --quiet
+docker exec prometheus promtool check config /etc/prometheus/prometheus.yml
+docker exec alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
+docker compose exec alloy alloy validate --stability.level=experimental /etc/alloy/config.alloy
+curl -fsS -X POST http://127.0.0.1:9090/-/reload
+curl -fsS -X POST http://127.0.0.1:9093/-/reload
+curl -fsS http://127.0.0.1:3100/ready
+```
+
+Edit the tracked `.example` files and regenerate with
+`docker compose run --rm --no-deps config-generator`. This also regenerates
+`prometheus/rules/logging-alerts.yml`, both Alloy configurations, Loki ingress,
+ntfy server settings and the PVE exporter configuration. All generated files are
+ignored. The generator does not deploy Proxmox files or fill in this runbook.
+Validate before reloading; restarting an unchanged Compose service is not a reliable
+substitute for reloading edited bind-mounted configs. See `README.md` and `tests/README.md`.
+If a file was replaced by Git or a deployment tool, its bind mount may still refer
+to the old inode. Recreate the affected container with
+`docker compose up -d --no-deps --force-recreate SERVICE`, then verify the loaded
+configuration (for Alertmanager, use `amtool config routes test` against its API).
+After recreating Loki, reload `loki-ingress` with `nginx -s reload` so nginx resolves
+the backend's current Docker address. Do not recreate the whole stack unnecessarily.
+
+Copies of the deployed Proxmox files are in `proxmox/` in this repository:
+`config.alloy` → `/etc/alloy/config.alloy`; `grafana.list` →
+`/etc/apt/sources.list.d/grafana.list`; `alloy-override.conf` →
+`/etc/systemd/system/alloy.service.d/log-forwarding.conf`;
+`node-exporter-override.conf` →
+`/etc/systemd/system/prometheus-node-exporter.service.d/systemd-collector.conf`;
+the heartbeat service and timer → `/etc/systemd/system/`.
+Grafana's signing key is at `/etc/apt/keyrings/grafana.asc` on Proxmox.
+
+On Proxmox:
+
+```sh
+alloy validate --stability.level=experimental /etc/alloy/config.alloy
+systemctl reload alloy
+systemctl status alloy homelab-log-heartbeat.timer prometheus-node-exporter
+journalctl -u alloy --since '10 minutes ago'
+```
+
+## Silence maintenance alerts
+
+From a trusted terminal, tunnel to watcher:
+
+```sh
+ssh -L 9093:127.0.0.1:9093 watcher
+```
+
+Open `http://localhost:9093`, choose the alert, create a silence with precise matchers
+(for example `alertname="ServiceDown"` and `service="alloy.service"`), and set an
+expiry. Notification silences do not stop scraping or log collection.
+
+## Verification performed on 2026-10-05
+
+- Loki, Alloy, Prometheus and Alertmanager configurations validated with their tools.
+- All 19 Prometheus targets were healthy after the changes, including ntfy health.
+- Proxmox, the active Nextcloud container and watcher log streams returned labelled log entries.
+- Grafana provisioned Loki successfully and its database health check passed.
+- Unauthorised LAN log pushes and LAN Loki queries returned HTTP 403.
+- Anonymous ntfy reads, phone publishing and publisher reads were rejected.
+- Warning test delivered through Alertmanager in 5 seconds.
+- A disposable `homelab-alert-test.service` failed deliberately: the real ServiceDown
+  rule delivered a critical notification in 25 seconds. A recovery notification
+  subsequently arrived; the disposable service was stopped and removed from runtime.
+- Real Proxmox journal → Alloy → Loki ruler → Alertmanager → ntfy test delivered in
+  24 seconds. The temporary rule was moved to `tests/loki-acceptance.yml` after it cleared.
+- Synthetic log streams verified OOM matching and distinguished failed backups from
+  successful backups and unrelated task failures; no real OOM/backup failure induced.
+- Loki was stopped and restarted. Messages written before and during the interruption
+  were queryable afterwards; Proxmox Alloy reported zero dropped entries.
+- HTTPS ntfy health succeeded from Proxmox over Tailscale with certificate validation.
+- ntfy and Tailscale were restarted together successfully after separating their
+  network namespaces. The Tailscale identity, HTTPS access, users and message cache survived.
+- Both phone commissioning messages reached their respective ntfy topics in 5 seconds.
+- Both commissioning tests automatically cleared and delivered low-priority resolved
+  notifications to their respective topics at the next 5-minute group interval.
+- Four bridge tests passed, including retryable HTTP failure behaviour and Unicode limits.
+
+The user confirmed both critical and warning notifications appeared in the phone
+app on 2026-10-05. Locked-phone and off-home-Wi-Fi behaviour was not separately
+tested. No full host reboot or whole-stack down/up was performed, and 14-day expiry has not been observed
+over time. Services have systemd enablement or Compose restart policies configured.
+
+## Backups and rollback
+
+Pre-change watcher configurations are in
+`/opt/observability/backups/20261005-loki-ntfy/`; Proxmox originals are in
+`/root/observability-backup-20261005/`. Secrets and live database volumes were not
+copied into those configuration backups.
+
+To revert alert routing, restore the backed-up `alertmanager/alertmanager.yml`,
+validate it with amtool and reload Alertmanager. This returns delivery to alert-dump.
+To stop new logging, stop `alloy` on Proxmox and the `alloy`, `loki-ingress`, and
+`loki` Compose services on watcher. Keep the data volumes for recovery; never use
+`docker compose down -v` for this rollback. Restore Prometheus config/templates
+and remove the added rules from the active rules directory before reloading if
+retiring the pipeline, to avoid alerts for intentionally removed components.
+
+Keep live addresses and guest IDs in ignored `.env`, not this tracked template.
+Verify against Proxmox and healthy monitoring probes if older notes disagree.

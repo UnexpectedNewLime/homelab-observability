@@ -30,6 +30,11 @@ groups:
           severity: critical
         annotations:
           summary: "Proxmox guest is down"
+          ct: '{{ if eq $labels.id "lxc/NEXTCLOUD_CT_ID" }}NEXTCLOUD_CT_ID{{ else }}none{{ end }}'
+          vm: '{{ if eq $labels.id "qemu/DISCORD_VM_ID" }}DISCORD_VM_ID{{ else }}none{{ end }}'
+          service: '{{ if eq $labels.id "lxc/NEXTCLOUD_CT_ID" }}nextcloud{{ else }}discord-bot{{ end }}'
+          severity: critical
+          runbook_hint: "Inspect the guest in Proxmox. Only the configured active guests are monitored."
           description: "Proxmox guest {{ $labels.id }} is not running."
           runbook: "Check Proxmox UI, guest logs, storage availability, and recent power events."
 
@@ -47,7 +52,7 @@ groups:
       - alert: FilesystemNearlyFull
         expr: |
           100 * (
-            1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"} 
+            1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"}
               / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|proc|sysfs|devtmpfs"}
           ) > 85
         for: 10m

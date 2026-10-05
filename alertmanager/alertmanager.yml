@@ -2,14 +2,34 @@ global:
   resolve_timeout: 5m
 
 route:
-  receiver: alert-dump
-  group_by: ["alertname", "instance", "service"]
-  group_wait: 30s
+  receiver: ntfy-warning
+  group_by: ["alertname", "instance", "host", "ct", "service", "severity"]
+  group_wait: 5s
   group_interval: 5m
   repeat_interval: 4h
+  routes:
+    - receiver: alert-dump
+      continue: true
+    - matchers: ['severity="critical"']
+      receiver: ntfy-critical
+      repeat_interval: 1h
+    - matchers: ['severity="warning"']
+      receiver: ntfy-warning
+      repeat_interval: 12h
+    # alert-dump always matches, so the parent receiver alone is not a fallback.
+    - receiver: ntfy-warning
+      repeat_interval: 12h
 
 receivers:
   - name: alert-dump
     webhook_configs:
       - url: http://alert-dump:8080/alertmanager
+        send_resolved: true
+  - name: ntfy-critical
+    webhook_configs:
+      - url: http://ntfy-bridge:8081/alertmanager
+        send_resolved: true
+  - name: ntfy-warning
+    webhook_configs:
+      - url: http://ntfy-bridge:8081/alertmanager
         send_resolved: true

@@ -1,0 +1,122 @@
+# Evaluates the real rendered rules against synthetic time series; no live server.
+rule_files:
+  - ../prometheus/rules/logging-alerts.yml
+  - ../prometheus/rules/homelab.yml
+evaluation_interval: 15s
+tests:
+  - name: core service debounce, firing, excluded service and recovery
+    interval: 15s
+    input_series:
+      - series: 'node_systemd_unit_state{service="proxmox",name="alloy.service",state="failed",instance="test-pve"}'
+        values: '1x2 0x2'
+      - series: 'node_systemd_unit_state{service="proxmox",name="openipmi.service",state="failed",instance="test-pve"}'
+        values: '1x5'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="ServiceDown",alertstate="firing"}'
+        eval_time: 0s
+        exp_samples: []
+      - expr: 'count(ALERTS{alertname="ServiceDown",alertstate="firing",service="alloy.service",severity="critical",host="pve",ct="host"})'
+        eval_time: 15s
+        exp_samples: [{labels: '{}', value: 1}]
+      - expr: 'ALERTS{alertname="ServiceDown",alertstate="firing",service="openipmi.service"}'
+        eval_time: 30s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="ServiceDown",alertstate="firing"}'
+        eval_time: 45s
+        exp_samples: []
+  - name: guest selection, debounce and recovery
+    interval: 15s
+    input_series:
+      - series: 'pve_up{id="lxc/901"}'
+        values: '0x8 1x2'
+      - series: 'pve_up{id="qemu/902"}'
+        values: '0x8 1x2'
+      - series: 'pve_up{id="lxc/903"}'
+        values: '0x12'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="ProxmoxGuestDown",alertstate="firing"}'
+        eval_time: 105s
+        exp_samples: []
+      - expr: 'count(ALERTS{alertname="ProxmoxGuestDown",alertstate="firing",severity="critical"})'
+        eval_time: 2m
+        exp_samples: [{labels: '{}', value: 2}]
+      - expr: 'ALERTS{alertname="ProxmoxGuestDown",id="lxc/903"}'
+        eval_time: 2m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="ProxmoxGuestDown",alertstate="firing"}'
+        eval_time: 135s
+        exp_samples: []
+  - name: disk threshold, duration, read-only and pseudo filesystem exclusions
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{service="proxmox",instance="test-pve",device="disk",mountpoint="/data",fstype="zfs"}'
+        values: '9x10 20x2'
+      - series: 'node_filesystem_size_bytes{service="proxmox",instance="test-pve",device="disk",mountpoint="/data",fstype="zfs"}'
+        values: '100x12'
+      - series: 'node_filesystem_readonly{service="proxmox",instance="test-pve",device="disk",mountpoint="/data",fstype="zfs"}'
+        values: '0x12'
+      - series: 'node_filesystem_avail_bytes{service="proxmox",instance="test-pve",device="ro",mountpoint="/ro",fstype="zfs"}'
+        values: '1x12'
+      - series: 'node_filesystem_size_bytes{service="proxmox",instance="test-pve",device="ro",mountpoint="/ro",fstype="zfs"}'
+        values: '100x12'
+      - series: 'node_filesystem_readonly{service="proxmox",instance="test-pve",device="ro",mountpoint="/ro",fstype="zfs"}'
+        values: '1x12'
+      - series: 'node_filesystem_avail_bytes{service="proxmox",instance="test-pve",device="tmp",mountpoint="/tmp",fstype="tmpfs"}'
+        values: '1x12'
+      - series: 'node_filesystem_size_bytes{service="proxmox",instance="test-pve",device="tmp",mountpoint="/tmp",fstype="tmpfs"}'
+        values: '100x12'
+      - series: 'node_filesystem_readonly{service="proxmox",instance="test-pve",device="tmp",mountpoint="/tmp",fstype="tmpfs"}'
+        values: '0x12'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="DiskPressure",alertstate="firing"}'
+        eval_time: 9m
+        exp_samples: []
+      - expr: 'count(ALERTS{alertname="DiskPressure",alertstate="firing",mountpoint="/data",severity="critical"})'
+        eval_time: 10m
+        exp_samples: [{labels: '{}', value: 1}]
+      - expr: 'ALERTS{alertname="DiskPressure",mountpoint=~"/ro|/tmp"}'
+        eval_time: 10m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="DiskPressure",alertstate="firing"}'
+        eval_time: 11m
+        exp_samples: []
+  - name: missing telemetry detection and recovery
+    interval: 15s
+    input_series:
+      - series: 'up{job="observability-self",service="loki"}'
+        values: '0x8 1x2'
+      - series: 'node_systemd_unit_state{service="proxmox",name="alloy.service",state="active"}'
+        values: '_ _ _ _ _ _ _ _ _ 1x2'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="LokiDown",alertstate="firing"}'
+        eval_time: 45s
+        exp_samples: []
+      - expr: 'count(ALERTS{alertname="LokiDown",alertstate="firing",host="test-watcher",severity="critical"})'
+        eval_time: 1m
+        exp_samples: [{labels: '{}', value: 1}]
+      - expr: 'count(ALERTS{alertname="ProxmoxSystemdMetricsMissing",alertstate="firing",severity="warning"})'
+        eval_time: 2m
+        exp_samples: [{labels: '{}', value: 1}]
+      - expr: 'ALERTS{alertname=~"LokiDown|ProxmoxSystemdMetricsMissing",alertstate="firing"}'
+        eval_time: 135s
+        exp_samples: []
+  - name: notification and ruler error counters
+    interval: 1m
+    input_series:
+      - series: ntfy_bridge_failures_total
+        values: '0 0 1 1x8'
+      - series: loki_prometheus_rule_evaluation_failures_total
+        values: '0 0 1 1x8'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname=~"NtfyDeliveryFailures|LokiRuleEvaluationFailures",alertstate="firing"}'
+        eval_time: 1m
+        exp_samples: []
+      - expr: 'count(ALERTS{alertname="NtfyDeliveryFailures",alertstate="firing",severity="critical"})'
+        eval_time: 2m
+        exp_samples: [{labels: '{}', value: 1}]
+      - expr: 'count(ALERTS{alertname="LokiRuleEvaluationFailures",alertstate="firing",severity="warning"})'
+        eval_time: 2m
+        exp_samples: [{labels: '{}', value: 1}]
+      - expr: 'ALERTS{alertname=~"NtfyDeliveryFailures|LokiRuleEvaluationFailures",alertstate="firing"}'
+        eval_time: 8m
+        exp_samples: []

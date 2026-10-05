@@ -1,0 +1,10 @@
+base-url: "NTFY_BASE_URL"
+listen-http: ":80"
+behind-proxy: true
+auth-default-access: deny-all
+auth-file: /var/lib/ntfy/auth.db
+cache-file: /var/lib/ntfy/cache.db
+cache-duration: 72h
+enable-signup: false
+enable-login: true
+enable-reservations: false

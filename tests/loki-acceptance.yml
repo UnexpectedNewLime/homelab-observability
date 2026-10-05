@@ -1,0 +1,18 @@
+# Acceptance-only: copy into loki/rules/fake temporarily when explicitly testing.
+groups:
+  - name: homelab_log_acceptance
+    interval: 15s
+    rules:
+      - alert: HomelabLogPipelineTest
+        expr: sum(count_over_time({host="pve", ct="host"} |= "HOMELAB-LOG-ALERT-TEST-20261005" [1m])) > 0
+        labels:
+          severity: warning
+          host: pve
+          ct: host
+          service: acceptance-test
+        annotations:
+          summary: "Test: Proxmox journal to Alloy to Loki ruler to ntfy is working"
+          ct: host
+          service: acceptance-test
+          severity: warning
+          runbook_hint: "Synthetic acceptance test; no production service has failed."
