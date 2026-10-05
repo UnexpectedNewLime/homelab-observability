@@ -1,8 +1,17 @@
 # Secrets
 .env
+.env.*
+!.env.example
 *.secret
 *.key
 *.pem
+secrets/
+credentials/
+*.db
+*.db-*
+*.sqlite*
+*.bak
+*.log
 
 # Proxmox API token config
 pve/pve.yml
@@ -10,11 +19,21 @@ pve/pve.yml
 # Real internal IPs/hostnames/IDs (see .example counterparts)
 prometheus/prometheus.yml
 prometheus/rules/homelab.yml
+prometheus/rules/logging-alerts.yml
+alloy/config.alloy
+proxmox/config.alloy
+loki/ingress.conf
+ntfy/server.yml
+LOGGING-ALERTING-RUNBOOK.md
 
 # Runtime/generated data
 prometheus-data/
 alertmanager-data/
 grafana-data/
+loki-data/
+alloy-data/
+ntfy-data/
+tailscale-ntfy-data/
 
 # Local editor/system files
 .DS_Store
@@ -24,3 +43,9 @@ grafana-data/
 # Local machine-only state
 .ssh/
 .claude/
+backups/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.test-output/

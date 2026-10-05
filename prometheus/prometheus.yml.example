@@ -12,6 +12,21 @@ rule_files:
   - /etc/prometheus/rules/*.yml
 
 scrape_configs:
+  - job_name: observability-self
+    static_configs:
+      - targets: ["loki:3100"]
+        labels: {service: loki, host: WATCHER_HOST_LABEL, ct: host}
+      - targets: ["alloy:12345"]
+        labels: {service: alloy, host: WATCHER_HOST_LABEL, ct: host}
+      - targets: ["alertmanager:9093"]
+        labels: {service: alertmanager}
+      - targets: ["blackbox:9115"]
+        labels: {service: blackbox}
+      - targets: ["pve-exporter:9221"]
+        labels: {service: pve-exporter}
+      - targets: ["ntfy-bridge:8081"]
+        labels: {service: ntfy-bridge}
+
   - job_name: prometheus
     static_configs:
       - targets:
@@ -90,6 +105,13 @@ scrape_configs:
     params:
       module: [http_insecure_2xx]
     static_configs:
+      - targets:
+          - http://ntfy:80/v1/health
+        labels:
+          service: ntfy
+          check_type: http
+          endpoint: ntfy-health
+
       - targets:
           - https://PROXMOX_IP:8006/
         labels:

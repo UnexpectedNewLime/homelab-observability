@@ -1,17 +1,18 @@
 services:
   config-generator:
-    image: busybox:stable
+    image: python@sha256:646fb0bca3dd3ea1bcc6feb72c17ed16eed6e10cffc732fcc1478bd3e7f02d7b
+    user: "1000:1000"
     container_name: config-generator
     env_file: .env
-    entrypoint: ["sh", "/generate-config.sh"]
+    entrypoint: ["python", "-B", "/scripts/generate-config.py", "--root", "/repo", "--output", "/repo"]
     volumes:
-      - ./scripts/generate-config.sh:/generate-config.sh:ro
-      - ./prometheus/prometheus.yml.example:/templates/prometheus.yml.example:ro
-      - ./prometheus/rules/homelab.yml.example:/templates/homelab.yml.example:ro
-      - ./pve/pve.yml.example:/templates/pve.yml.example:ro
-      - ./prometheus:/output/prometheus
-      - ./prometheus/rules:/output/rules
-      - ./pve:/output/pve
+      - ./scripts:/scripts:ro
+      - ./prometheus:/repo/prometheus
+      - ./pve:/repo/pve
+      - ./loki:/repo/loki
+      - ./ntfy:/repo/ntfy
+      - ./alloy:/repo/alloy
+      - ./proxmox:/repo/proxmox
 
   prometheus:
     image: prom/prometheus:latest
@@ -58,10 +59,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      # Existing users/password hashes live in grafana-data. Bootstrap explicitly
+      # on a fresh volume rather than silently creating a default-password admin.
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources/loki.yml:/etc/grafana/provisioning/datasources/loki.yml:ro
     depends_on:
       - prometheus
 
@@ -80,6 +83,8 @@ services:
     image: prompve/prometheus-pve-exporter:latest
     container_name: pve-exporter
     restart: unless-stopped
+    # Generated token config is 0640, owned by deployment UID/GID 1000.
+    group_add: ["1000"]
     depends_on:
       config-generator:
         condition: service_completed_successfully
@@ -106,7 +111,116 @@ services:
     volumes:
       - ./alert-dump:/app
 
+  loki:
+    image: grafana/loki@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yml"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - ./loki/rules:/etc/loki/rules:ro
+      - loki-data:/loki
+    logging: &bounded-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  loki-ingress:
+    image: nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+    restart: unless-stopped
+    ports:
+      - "${MONITORING_IP:?Set MONITORING_IP in .env}:3100:3100"
+    volumes:
+      - ./loki/ingress.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      config-generator:
+        condition: service_completed_successfully
+      loki:
+        condition: service_started
+    logging: *bounded-logging
+
+  alloy:
+    image: grafana/alloy@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+    restart: unless-stopped
+    command:
+      - run
+      - --stability.level=experimental
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      config-generator:
+        condition: service_completed_successfully
+      loki:
+        condition: service_started
+    logging: *bounded-logging
+
+  ntfy-tailscale:
+    image: tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065
+    hostname: watcher-alerts
+    restart: unless-stopped
+    environment:
+      TS_HOSTNAME: watcher-alerts
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"
+      TS_BOOT_TIMEOUT: "30m"
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-ntfy-data:/var/lib/tailscale
+      - ./tailscale-ntfy:/config:ro
+    logging: *bounded-logging
+
+  ntfy:
+    image: binwiederhier/ntfy@sha256:6ef4b819f722fccdc036af611c4774cfdc2de821ab74fdd48bbf4c9d6f8973da
+    restart: unless-stopped
+    command: [serve]
+    ports:
+      - "127.0.0.1:8090:80"
+    volumes:
+      - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ntfy-data:/var/lib/ntfy
+    logging: *bounded-logging
+    depends_on:
+      config-generator:
+        condition: service_completed_successfully
+
+  ntfy-bridge:
+    image: python@sha256:646fb0bca3dd3ea1bcc6feb72c17ed16eed6e10cffc732fcc1478bd3e7f02d7b
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: [python, -B, -u, /app/app.py]
+    environment:
+      NTFY_BASE: http://ntfy:80
+      NTFY_USER: alert-publisher
+      NTFY_PASSWORD_FILE: /run/secrets/ntfy-publisher
+    volumes:
+      - ./ntfy-bridge:/app:ro
+      - type: bind
+        source: ${NTFY_CREDENTIALS_DIR:?Set NTFY_CREDENTIALS_DIR in .env}/ntfy-publisher.secret
+        target: /run/secrets/ntfy-publisher
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on: [ntfy]
+    logging: *bounded-logging
+
 volumes:
   prometheus-data:
   alertmanager-data:
   grafana-data:
+  loki-data:
+  alloy-data:
+  ntfy-data:
+  tailscale-ntfy-data:

@@ -1,0 +1,6 @@
+[Unit]
+Description=Emit a heartbeat to verify the Proxmox to Loki log pipeline
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -t homelab-log-heartbeat log-forwarding-heartbeat

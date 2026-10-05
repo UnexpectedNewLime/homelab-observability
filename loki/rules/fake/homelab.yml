@@ -1,0 +1,39 @@
+groups:
+  - name: homelab_log_alerts
+    interval: 15s
+    rules:
+      - alert: OOMKill
+        expr: >-
+          sum by (host, ct, service) (count_over_time({host="pve", ct="host", service="kernel"} |~ "(?i)(out of memory: killed process|memory cgroup out of memory: killed process|oom-kill:)" [5m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Proxmox reported an out-of-memory kill"
+          ct: '{{ $labels.ct }}'
+          service: '{{ $labels.service }}'
+          severity: critical
+          runbook_hint: "Inspect the matching kernel log and guest memory use; identify the affected process before restarting anything."
+      - alert: BackupFailed
+        expr: sum by (host, ct, service) (count_over_time({host="pve", service="pve-tasks"} |= ":vzdump:" !~ " OK$" [15m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "A Proxmox vzdump backup task failed"
+          ct: '{{ $labels.ct }}'
+          service: '{{ $labels.service }}'
+          severity: critical
+          runbook_hint: "Inspect the UPID in the pve-tasks stream and the backup target in Proxmox. Notification only; no automatic restart."
+      - alert: ProxmoxLogForwardingStalled
+        expr: absent_over_time({host="pve", ct="host", service="homelab-log-heartbeat"}[5m])
+        for: 1m
+        labels:
+          severity: warning
+          host: pve
+          ct: host
+          service: alloy
+        annotations:
+          summary: "No Proxmox log heartbeat has reached Loki for five minutes"
+          ct: host
+          service: alloy
+          severity: warning
+          runbook_hint: "Check alloy and homelab-log-heartbeat.timer on Proxmox, its WAL disk space, and watcher Loki ingress."
