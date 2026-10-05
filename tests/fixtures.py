@@ -12,5 +12,4 @@ VALUES = {
     "NEXTCLOUD_JOURNAL_PATH": "/srv/test-container/var/log/journal",
     "NTFY_BASE_URL": "https://alerts.example.invalid",
     "NTFY_CREDENTIALS_DIR": "/tmp/test-credentials",
-    "GF_SECURITY_ADMIN_PASSWORD": "synthetic-test-only-not-a-password",
 }

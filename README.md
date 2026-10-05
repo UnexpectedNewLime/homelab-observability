@@ -25,7 +25,7 @@ Adding an ignore rule does not untrack a file or remove it from Git history.
 1. Copy `.env.example` to `.env`, restrict it with `chmod 600 .env`, and fill every
    field locally. Use an IPv4 address for each `*_IP`, a hostname (no scheme) for
    `NEXTCLOUD_URL`, an HTTPS origin for `NTFY_BASE_URL`, the actual Nextcloud journal
-   path and active guest IDs. Choose a unique Grafana password.
+   path and active guest IDs.
 2. Set `NTFY_CREDENTIALS_DIR` to an absolute directory on watcher. The provisioning
    and acceptance scripts default to `~/.config/homelab-alerting`; export the variable
    explicitly when invoking them if you use a different directory. They do not load `.env`.
@@ -52,9 +52,19 @@ Adding an ignore rule does not untrack a file or remove it from Git history.
    to the Proxmox host; generation alone does not change that host. Grant Alloy
    journal access, validate the configuration, and enable/reload the services.
 
-On an existing Grafana volume, changing `GF_SECURITY_ADMIN_PASSWORD` in `.env`
-does not necessarily change the login stored in Grafana's database; rotate it using
-Grafana's supported password-management process.
+Grafana manages user passwords in its database on `grafana-data`. Keep your login
+in your password manager and change it through Grafana's account settings. There
+is no Grafana password in `.env`, the container environment or a host `.secret`
+file, and normal password changes do not require a container restart.
+
+Normal startup disables initial admin creation. If the data volume is missing or
+empty, Grafana will not silently recreate a default-password admin. Restore the
+database or explicitly bootstrap an administrator using a temporary configuration
+with `GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION=false` and a strong bootstrap
+password, then remove those temporary inputs and return to the normal Compose
+configuration. Do this before exposing a fresh Grafana instance. For a lost
+password on an existing database, use Grafana's CLI reset command with
+`--password-from-stdin`; it updates the database without requiring a saved copy.
 
 ## Tests
 

@@ -40,6 +40,13 @@ own user with `adm` and `systemd-journal` membership, not as root.
 Grafana: `http://MONITORING_IP:3000`, Explore → Loki (UID `homelab-loki`).
 The existing Prometheus datasource was retained.
 
+Grafana login passwords are managed in its database on `grafana-data`. Store your
+login in your password manager and change it through Grafana's account settings;
+no `.env` or `.secret` copy needs updating. Normal startup disables initial admin
+creation, so a missing database requires restoration or an explicit fresh bootstrap
+as described in `README.md`. Password recovery on an existing database is available
+through Grafana's CLI with `--password-from-stdin`.
+
 ```logql
 {host="pve", ct="host"}
 {host="pve", ct="NEXTCLOUD_CT_ID"}
