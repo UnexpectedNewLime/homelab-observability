@@ -49,6 +49,17 @@ with tempfile.TemporaryDirectory(prefix="observability-tests-") as directory:
     run("docker", "compose", "--project-directory", directory, "--env-file", str(scratch / ".env"),
         "-f", str(scratch / "docker-compose.yml"), "config", "--quiet", env=env)
     tool(PROM, "/bin/promtool", "check", "config", "/work/prometheus/prometheus.yml")
+    # Native parsing must accept labels that YAML would otherwise type as
+    # booleans, null or numbers, in both scrape labels and alert-rule labels.
+    for host_label in ("true", "null", "123"):
+        rendered = generator.render(ROOT, {**VALUES, "WATCHER_HOST_LABEL": host_label})
+        for name in ("prometheus/prometheus.yml", "prometheus/rules/logging-alerts.yml"):
+            text = rendered[name].replace("/etc/prometheus/rules/", "/work/prometheus/rules/")
+            (scratch / name).write_text(text)
+        tool(PROM, "/bin/promtool", "check", "config", "/work/prometheus/prometheus.yml")
+    rendered = generator.render(ROOT, VALUES)
+    for name in ("prometheus/prometheus.yml", "prometheus/rules/logging-alerts.yml"):
+        (scratch / name).write_text(rendered[name].replace("/etc/prometheus/rules/", "/work/prometheus/rules/"))
     tool(PROM, "/bin/promtool", "test", "rules", "/work/tests/prometheus-rules.yml")
     tool(AM, "/bin/amtool", "check-config", "/work/alertmanager/alertmanager.yml")
     for labels, receivers in ((["severity=critical"], "alert-dump,ntfy-critical"),

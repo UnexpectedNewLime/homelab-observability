@@ -37,6 +37,22 @@ class GeneratorTests(unittest.TestCase):
         line = next(line for line in rendered["pve/pve.yml"].splitlines() if "token_value:" in line)
         self.assertEqual(json.loads(line.split(":", 1)[1]), value)
 
+    def test_yaml_typed_host_labels_remain_strings(self):
+        for value in ("true", "false", "null", "123", "1e3", "0x10", "yes", "2026-10-08"):
+            with self.subTest(value=value):
+                rendered = generator.render(ROOT, {**VALUES, "WATCHER_HOST_LABEL": value})
+                scrape_lines = [line for line in rendered["prometheus/prometheus.yml"].splitlines()
+                                if "host:" in line]
+                self.assertEqual(len(scrape_lines), 2)
+                for line in scrape_lines:
+                    label = line.split("host:", 1)[1].split(",", 1)[0].strip()
+                    self.assertEqual(json.loads(label), value)
+                rule_lines = [line for line in rendered["prometheus/rules/logging-alerts.yml"].splitlines()
+                              if "host:" in line and line.split("host:", 1)[1].strip() != "pve"]
+                self.assertTrue(rule_lines)
+                for line in rule_lines:
+                    self.assertEqual(json.loads(line.split("host:", 1)[1].strip()), value)
+
     def test_missing_input_writes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
             values = {key: value for key, value in VALUES.items() if key != "NTFY_BASE_URL"}

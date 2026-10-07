@@ -44,8 +44,11 @@ Adding an ignore rule does not untrack a file or remove it from Git history.
    configuration validation/reloads, see [the runbook template](LOGGING-ALERTING-RUNBOOK.md.example).
 5. On a new deployment, start `docker compose up -d ntfy ntfy-tailscale`, enrol
    `ntfy-tailscale` in your tailnet, confirm its HTTPS name matches `NTFY_BASE_URL`,
-   and run `python3 scripts/provision-ntfy-users.py` once. It refuses to overwrite
-   existing credentials. Then start the full stack with `docker compose up -d`.
+   and run `python3 scripts/provision-ntfy-users.py`. If interrupted, rerun it to
+   resume with the same saved passwords and reapply the topic permissions. It never
+   overwrites credentials or rotates existing account passwords. If an existing
+   account has lost its secret file, restore that file before retrying. Then start
+   the full stack with `docker compose up -d`.
    Existing deployments skip enrolment/provisioning. The bridge deliberately refuses
    to mount a missing credential file. Never run provisioning merely to test.
 6. Deploy generated `proxmox/config.alloy` and the supplied systemd files separately
