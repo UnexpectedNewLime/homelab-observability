@@ -66,6 +66,13 @@ configuration. Do this before exposing a fresh Grafana instance. For a lost
 password on an existing database, use Grafana's CLI reset command with
 `--password-from-stdin`; it updates the database without requiring a saved copy.
 
+## Grafana dashboards
+
+The six version-controlled dashboard definitions and import instructions are in
+[grafana/dashboards](grafana/dashboards/README.md). They use selectable Prometheus
+and Loki datasources and discover hosts/guests from metric labels. Live exports
+and restore copies remain in ignored `backups/` directories.
+
 ## Tests
 
 ```sh
