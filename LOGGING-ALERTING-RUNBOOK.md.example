@@ -100,8 +100,10 @@ docker compose exec ntfy ntfy user change-pass phone
 
 After changing a password through the CLI, update the corresponding secret file
 securely; changing only a file does not update ntfy's user database. Provisioning
-script `scripts/provision-ntfy-users.py` intentionally refuses to overwrite existing
-credentials and is not a rotation script.
+script `scripts/provision-ntfy-users.py` reuses saved credentials and repairs missing
+users/topic grants after an interrupted run. It never overwrites credentials or
+changes existing account passwords; it is not a rotation script. Restore a missing
+secret for an existing account before retrying.
 
 Tailscale uses a named state volume and `TS_AUTH_ONCE=true`. The Tailscale
 and ntfy services have independent Docker network namespaces; Serve proxies to

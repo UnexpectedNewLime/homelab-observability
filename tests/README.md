@@ -10,7 +10,8 @@ production mounts; only a disposable tree of synthetic configs is used.
 | Layer | Checks |
 | --- | --- |
 | Repository | Private/generated paths ignored; templates trackable; staged blobs and current files scanned for literal addresses, tailnet DNS and common credential formats |
-| Generator | All eight templates, missing/invalid input fails before writes, quote/backslash escaping, no recursive substitution, symlink refusal, token file permissions and stable bind-mount inode |
+| Generator | All eight templates, missing/invalid input fails before writes, quote/backslash escaping, no recursive substitution, symlink refusal, token file permissions and stable bind-mount inode, YAML-typed host labels remain strings |
+| ntfy provisioning | Retry after failed user/ACL creation, second-account failures, retained passwords and file modes, missing-secret refusal and preflight before mutations; mocked CLI only |
 | ntfy bridge | Critical/warning/resolved priorities, mixed groups, fallback severity, UTF-8 size limit, malformed/oversized HTTP input, retryable delivery failure, health/metrics |
 | Prometheus | Real generated rules: pending/firing/recovery, active guest selection, excluded service, disk duration/read-only/pseudo-FS exclusions, missing telemetry and error counters |
 | Alertmanager | Native config validation; critical, warning, unknown and absent severity routing, including the parallel alert-dump receiver |
